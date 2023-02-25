@@ -7,21 +7,51 @@
 
 using namespace std;
 
+#define UNROLL_CONST 4;
+
 // kernel function where each thread performs matrix-vector multiplication 
-//		for their corresponding element of the result vector
+//		for their corresponding 4 elements of the result vector
 __global__ void multiplyMV(double *matrix, double *vector, double *result, int N) 
 {
-	int offset = blockIdx.x * blockDim.x;
-	int row = offset + threadIdx.x;
-
-    if (row < N) 
+	int row = (blockIdx.x * blockDim.x + threadIdx.x) * 4;
+    if (row < N && row + 3 < N) 
 	{	
 		for (int i = 0; i < N; i++) 
 		{
 			result[row] += matrix[row * N + i] * vector[i];
+            result[row + 1] += matrix[(row + 1) * N + i] * vector[i];
+            result[row + 2] += matrix[(row + 2) * N + i] * vector[i];
+            result[row + 3] += matrix[(row + 3) * N + i] * vector[i];
+            
 		}
-
 	}
+    else if (row < N)
+    {
+        int leftOver = N - row;
+        for (int i = 0; i < N; i++) 
+		{
+            for (int j = 0; j < leftOver; j++)
+            {
+                result[row + j] += matrix[(row + j) * N + i] * vector[i];
+            }
+        }
+    }
+}
+
+// kernel function where each thread performs matrix-vector multiplication 
+//		for their corresponding element of the result vector after the 
+//      offset index
+__global__ void multiplyMVLeftOver(double *matrix, double *vector, 
+    double *result, int N, int offset)
+{
+    int row = blockIdx.x * blockDim.x + threadIdx.x + offset;
+    if (row < N) 
+    {
+        for (int i = 0; i < N; i++) 
+		{
+			result[row] += matrix[row * N + i] * vector[i];
+		}
+    }    
 }
 
 // Returns a random double between 0.01 and 10
@@ -165,24 +195,24 @@ void printVec(double* vec, int N, string name)
 void setUpConfigs(vector<vector<int>> &configs)
 {
 	// 1024 elements, 5 blocks, and 205 threads per block
-    vector<int> config1 = {1024, 5, 205};
+    vector<int> config1 = {1025, 2, 256};
     configs.push_back(config1);
     
     // 4095 elements, 12 blocks, 342 threads per block
-	vector<int> config2 = {4095, 12, 342}; 
-    configs.push_back(config2);
+	//vector<int> config2 = {4095, 12, 342}; 
+    //configs.push_back(config2);
     
     // 12 elements, 12 blocks, 1 threads per block
-	vector<int> config3 = {12, 12, 1}; 
+	vector<int> config3 = {15, 1, 4}; 
     configs.push_back(config3);
     
     //8190/13 =630
-    vector<int> config4 = {8190, 13, 630}; 
-    configs.push_back(config4);
+    //vector<int> config4 = {8190, 13, 630}; 
+    //configs.push_back(config4);
     
     //11585/200=58
-    vector<int> config5 = {11585, 200, 58}; 
-    configs.push_back(config5); 
+    //vector<int> config5 = {11585, 200, 58}; 
+    //configs.push_back(config5);
 }
 
 int main(int argc, char *argv[]) 
@@ -191,7 +221,7 @@ int main(int argc, char *argv[])
     vector<vector<int>> configs;
     setUpConfigs(configs);
     
-    // host copies of matrix, vector, result, blasResult, and residual
+    // host copies of matrix, vector, result
     double *matrix, *vector, *result, *blasResult, *residual; 
 
     // device copies of matrix, vector, result
@@ -231,6 +261,10 @@ int main(int argc, char *argv[])
         // lauch kernel function 
         multiplyMV<<<numBlocks, numThreads>>>(d_matrix, d_vector, d_result, N);
         
+        //int completed = (N / 4) * 4;
+        //int leftOver = N - completed;
+        //multiplyMVLeftOver<<<1, leftOver>>>(d_matrix, d_vector, d_result, N, completed); 
+        
         // Copy result back to host
         cudaMemcpy(result, d_result, vectorSize, cudaMemcpyDeviceToHost);
 
@@ -255,7 +289,7 @@ int main(int argc, char *argv[])
         printVec(result, N, "Kernel Result");
         printVec(blasResult, N, "cuBLAS Result");
         printVec(residual, N, "Residual");
-        cout << "Is residual close or equal to 0? ";
+        cout << "Is residual close to or equal to 0? ";
         if (isSmallResidual) 
         {
             cout << "Yes" << endl;
@@ -263,8 +297,9 @@ int main(int argc, char *argv[])
         else 
         {
             cout << "No" << endl;
-        }        
-        cout << endl << endl;        
+        }
+            
+        cout << endl << endl;
 
         // free memory on device
         cudaFree(d_matrix);
