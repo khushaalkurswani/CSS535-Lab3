@@ -8,12 +8,13 @@
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 #include <iostream>
+#include "cublas_v2.h"
 
 using namespace std;
 
 
-#define N 1024
-#define BLOCK_SIZE 32
+#define N 35
+#define BLOCK_SIZE 1024
 
 __global__ void matrixVectorMul(double* A, double* x, double* y) {
     __shared__ double s_x[BLOCK_SIZE];
@@ -89,14 +90,32 @@ int main() {
     cudaMemcpy(y, d_y, N * sizeof(double), cudaMemcpyDeviceToHost);
 
     // Print result
-    printf("The vector is:\n");
+    printf("The result vector is:\n");
     printf("***************\n");
     for (int i = 0; i < N; ++i) {
-        cout<<y[i];
+        cout<<y[i] << " ";
     }
     printf("\n");
 
 
+    double  *d_blasResult, *blasResult;
+    cudaMalloc(&d_blasResult, N * sizeof(double));
+    blasResult = (double*)malloc(N * sizeof(double));
+    cublasHandle_t handle;
+    cublasCreate(&handle);
+    const double scale = 1;
+
+    cublasDgemv(handle, CUBLAS_OP_T, N, N, &scale, d_A, N, d_x,
+                1, &scale, d_blasResult, 1);
+    cudaMemcpy(blasResult, d_blasResult, N * sizeof(double), cudaMemcpyDeviceToHost);
+    cublasDestroy(handle);
+
+    printf("The  blas result vector is:\n");
+    printf("***************\n");
+    for (int i = 0; i < N; ++i) {
+        cout<<blasResult[i] << " ";
+    }
+    printf("\n");
     // Free memory on device
     cudaFree(d_A);
     cudaFree(d_x);
