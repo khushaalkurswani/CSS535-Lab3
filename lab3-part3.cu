@@ -71,22 +71,6 @@ __global__ void multiplyMV(double *matrix, double *vector, double *result, int N
     }
 }
 
-// kernel function where each thread performs matrix-vector multiplication 
-//		for their corresponding element of the result vector after the 
-//      offset index
-__global__ void multiplyMVLeftOver(double *matrix, double *vector, 
-    double *result, int N, int offset)
-{
-    int row = blockIdx.x * blockDim.x + threadIdx.x + offset;
-    if (row < N) 
-    {
-        for (int i = 0; i < N; i++) 
-		{
-			result[row] += matrix[row * N + i] * vector[i];
-		}
-    }    
-}
-
 // Returns a random double between 0.01 and 10
 double generateRandDouble()
 {
@@ -231,24 +215,24 @@ void printVec(double* vec, int N, string name)
 //      3rd element is number of threads per block
 void setUpConfigs(vector<vector<int>> &configs)
 {
-	// 1024 elements, 4 blocks, and 256 threads per block 
-    vector<int> config1 = {1024, 4, 256};
+	// 1024 elements, 4 blocks, and 64 threads per block 
+    vector<int> config1 = {1024, 4, 64};
     configs.push_back(config1);
     
-    // 4095 elements, 12 blocks, 342 threads per block
-	vector<int> config2 = {4095, 12, 342}; 
+    // 4095 elements, 12 blocks, 86 threads per block
+	vector<int> config2 = {4095, 12, 86}; 
     configs.push_back(config2);
     
-    // 12 elements, 1 block, 12 threads per block
-	vector<int> config3 = {12, 1, 12}; 
+    // 12 elements, 1 block, 3 threads per block
+	vector<int> config3 = {12, 1, 3}; 
     configs.push_back(config3);
     
-    // 8190 elements, 8 blocks, 1024 threads per block
-    vector<int> config4 = {8190, 8, 1024}; 
+    // 8190 elements, 8 blocks, 256 threads per block
+    vector<int> config4 = {8190, 8, 256}; 
     configs.push_back(config4);
     
-    // 11585 elements, 200 blocks, 58 threads per block
-    vector<int> config5 = {11585, 200, 58}; 
+    // 11585 elements, 200 blocks, 15 threads per block
+    vector<int> config5 = {11585, 200, 15}; 
     configs.push_back(config5);
 }
 
@@ -297,11 +281,7 @@ int main(int argc, char *argv[])
 
         // lauch kernel function 
         multiplyMV<<<numBlocks, numThreads>>>(d_matrix, d_vector, d_result, N);
-        
-        //int completed = (N / 4) * 4;
-        //int leftOver = N - completed;
-        //multiplyMVLeftOver<<<1, leftOver>>>(d_matrix, d_vector, d_result, N, completed); 
-        
+                
         // Copy result back to host
         cudaMemcpy(result, d_result, vectorSize, cudaMemcpyDeviceToHost);
 
