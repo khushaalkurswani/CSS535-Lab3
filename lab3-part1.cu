@@ -5,22 +5,23 @@
  * 1 March 2023
  *
  * Lab 3 - Profiling GPU GEMV
- * Part 0 - Baseline
+ * Part 1 - Global Memory
  *
  * Calculate matrix-vector product using implemented GPU kernel function
  * Verify kernel function's result with cuBLAS result
  * Profile the kernel function to gain insight related to GPU
- * 5 suboptimal execution configurations are chosen to test the kernel function
+ * 5 execution configurations that are optimal for global memory are chosen to 
+ *      test the kernel function
  *
  * Requires cuBLAS libraries
  *
  * Compile in CLI using the following command:
- *      nvcc lab3-part0.cu -lcublas
+ *      nvcc lab3-part1.cu -lcublas
  *
  * It is recommended to transfer the output of the program to a file when 
  *      running the program
  * To do so, use the following command:
- *      ./a.out > lab3Part0.txt
+ *      ./a.out > lab3Part1.txt
  * 
  * To profile the kernel functions, nsight compute or nvprof can be used
  *      nsight compute CLI command: 
@@ -199,24 +200,24 @@ void printVec(double* vec, int N, string name)
 //      3rd element is number of threads per block
 void setUpConfigs(vector<vector<int>> &configs)
 {
-	// 1024 elements, 5 blocks, and 205 threads per block
-    vector<int> config1 = {1024, 5, 205};
+	// 1024 elements, 4 blocks, and 256 threads per block
+    vector<int> config1 = {1024, 4, 256};
     configs.push_back(config1);
     
-    // 4095 elements, 12 blocks, 342 threads per block
-	vector<int> config2 = {4095, 12, 342}; 
+    // 4096 elements, 16 blocks, and 256 threads per block
+	vector<int> config2 = {4096, 16, 256}; 
     configs.push_back(config2);
     
-    // 12 elements, 12 blocks, 1 thread per block
-	vector<int> config3 = {12, 12, 1}; 
+    // 12 elements, 1 block, 12 threads per block
+	vector<int> config3 = {12, 1, 12}; 
     configs.push_back(config3);
     
-    // 8190 elements, 13 blocks, 630 threads per block
-    vector<int> config4 = {8190, 13, 630}; 
+    // 8192 elements, 16 blocks, 512 threads per block
+    vector<int> config4 = {8192, 16, 512}; 
     configs.push_back(config4);
     
-    // 11585 elements, 200 blocks, 58 threads per block
-    vector<int> config5 = {11585, 200, 58}; 
+    // 11585 elements, 182 blocks, 64 threads per block
+    vector<int> config5 = {11585, 182, 64}; 
     configs.push_back(config5); 
 }
 

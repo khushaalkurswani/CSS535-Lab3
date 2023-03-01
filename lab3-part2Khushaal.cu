@@ -1,35 +1,3 @@
-/**
- * Anthony Bustamante, Jesse Leu, Khushaal Kurswani
- * CSS 535 High Performance Computing
- * Professor Erika Parsons
- * 1 March 2023
- *
- * Lab 3 - Profiling GPU GEMV
- * Part 0 - Baseline
- *
- * Calculate matrix-vector product using implemented GPU kernel function
- * Verify kernel function's result with cuBLAS result
- * Profile the kernel function to gain insight related to GPU
- * 5 suboptimal execution configurations are chosen to test the kernel function
- *
- * Requires cuBLAS libraries
- *
- * Compile in CLI using the following command:
- *      nvcc lab3-part0.cu -lcublas
- *
- * It is recommended to transfer the output of the program to a file when 
- *      running the program
- * To do so, use the following command:
- *      ./a.out > lab3Part0.txt
- * 
- * To profile the kernel functions, nsight compute or nvprof can be used
- *      nsight compute CLI command: 
- *          ncu -o <profiler_output_file_name>  --set full <executable_file>
- * 
- *      nvprof CLI command:
- *          TODO: add nvprof CLI command
- */
-
 #include <iostream>
 #include <stdlib.h> 
 #include <math.h>
@@ -43,13 +11,25 @@ using namespace std;
 //		for their corresponding element of the result vector
 __global__ void multiplyMV(double *matrix, double *vector, double *result, int N) 
 {
-	int row = blockIdx.x * blockDim.x + threadIdx.x;
+	extern __shared__ double cachedVector[];
+    
+    int row = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int numRowsPerThread = (N + blockDim.x - 1) / blockDim.x;
+
+    int startIndex = threadIdx.x * numRowsPerThread;
+    int endIndex = startIndex + numRowsPerThread - 1;
+    for (int i = startIndex; i <= endIndex && i < N; i++) {
+        cachedVector[i] = vector[i];
+    }
+
+    __syncthreads();
 
     if (row < N) 
 	{	
 		for (int i = 0; i < N; i++) 
 		{
-			result[row] += matrix[row * N + i] * vector[i];
+			result[row] += matrix[row * N + i] * cachedVector[i];
 		}
 
 	}
@@ -93,14 +73,11 @@ void calcResidual(double *result, double *blasResult, double *residual, int N)
     }
 }
 
-// checks if residual vector has very small values
-//residual array's length must match the passed in
-//      N parameter
 bool isResidualSmall(double *residual, int N)
 {
     for (int i = 0; i < N; i++) 
     {
-        if (abs(residual[i]) > 0.0001)
+        if (residual[i] > 0.0001)
         {
             return false;
         }
@@ -109,7 +86,6 @@ bool isResidualSmall(double *residual, int N)
     return true;
 }
 
-// prints execution configuation
 void printConfig(int N, int numBlocks, int numThreads) 
 {
     cout << "Execution Configuration:" << endl;
@@ -207,15 +183,15 @@ void setUpConfigs(vector<vector<int>> &configs)
 	vector<int> config2 = {4095, 12, 342}; 
     configs.push_back(config2);
     
-    // 12 elements, 12 blocks, 1 thread per block
+    // 12 elements, 12 blocks, 1 threads per block
 	vector<int> config3 = {12, 12, 1}; 
     configs.push_back(config3);
     
-    // 8190 elements, 13 blocks, 630 threads per block
+    //8190/13 =630
     vector<int> config4 = {8190, 13, 630}; 
     configs.push_back(config4);
     
-    // 11585 elements, 200 blocks, 58 threads per block
+    //11585/200=58
     vector<int> config5 = {11585, 200, 58}; 
     configs.push_back(config5); 
 }
@@ -264,7 +240,7 @@ int main(int argc, char *argv[])
         cudaMemcpy(d_vector, vector, vectorSize, cudaMemcpyHostToDevice);
 
         // lauch kernel function 
-        multiplyMV<<<numBlocks, numThreads>>>(d_matrix, d_vector, d_result, N);
+        multiplyMV<<<numBlocks, numThreads, N * sizeof(double)>>>(d_matrix, d_vector, d_result, N);
         
         // Copy result back to host
         cudaMemcpy(result, d_result, vectorSize, cudaMemcpyDeviceToHost);
@@ -280,7 +256,6 @@ int main(int argc, char *argv[])
         cudaMemcpy(blasResult, d_blasResult, vectorSize, cudaMemcpyDeviceToHost);
         cublasDestroy(handle);
         
-        // calculate residual
         calcResidual(result, blasResult, residual, N);
         bool isSmallResidual = isResidualSmall(residual, N);
 
@@ -291,7 +266,7 @@ int main(int argc, char *argv[])
         printVec(result, N, "Kernel Result");
         printVec(blasResult, N, "cuBLAS Result");
         printVec(residual, N, "Residual");
-        cout << "Is residual close to or equal to 0? ";
+        cout << "Is residual close or equal to 0? ";
         if (isSmallResidual) 
         {
             cout << "Yes" << endl;

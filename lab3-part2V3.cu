@@ -5,22 +5,25 @@
  * 1 March 2023
  *
  * Lab 3 - Profiling GPU GEMV
- * Part 0 - Baseline
+ * Part 2 - Shared Memory
  *
  * Calculate matrix-vector product using implemented GPU kernel function
  * Verify kernel function's result with cuBLAS result
  * Profile the kernel function to gain insight related to GPU
- * 5 suboptimal execution configurations are chosen to test the kernel function
+ * 5 execution configurations that are optimal for shared memory usage are 
+ *      chosen to test the kernel function
+ * Kernel function was also modified to use loop unrolling to optimize block 
+ *      shared memory usage
  *
  * Requires cuBLAS libraries
  *
  * Compile in CLI using the following command:
- *      nvcc lab3-part0.cu -lcublas
+ *      nvcc lab3-part2.cu -lcublas
  *
  * It is recommended to transfer the output of the program to a file when 
  *      running the program
  * To do so, use the following command:
- *      ./a.out > lab3Part0.txt
+ *      ./a.out > lab3Part2.txt
  * 
  * To profile the kernel functions, nsight compute or nvprof can be used
  *      nsight compute CLI command: 
@@ -29,6 +32,7 @@
  *      nvprof CLI command:
  *          TODO: add nvprof CLI command
  */
+
 
 #include <iostream>
 #include <stdlib.h> 
@@ -41,17 +45,37 @@ using namespace std;
 
 // kernel function where each thread performs matrix-vector multiplication 
 //		for their corresponding element of the result vector
-__global__ void multiplyMV(double *matrix, double *vector, double *result, int N) 
+__global__ void multiplyMV(double *matrix, double *vector, double *result, int N, int numShared) 
 {
-	int row = blockIdx.x * blockDim.x + threadIdx.x;
+    // maximum shared memory per block is 48 KB so 6144 is the maximum number
+    //      of double numbers that can fit in shared memory
+    __shared__ double cachedVector[6144]; 
+    
+    int row = blockIdx.x * blockDim.x + threadIdx.x;
+
+    // copy vector elements into shared memory 
+    int numRowsPerThread = (numShared + blockDim.x - 1) / blockDim.x;
+    int startIndex = threadIdx.x * numRowsPerThread;
+    int endIndex = startIndex + numRowsPerThread - 1;
+    for (int i = startIndex; i <= endIndex && i < numShared; i++) {
+        cachedVector[i] = vector[i];
+    }
+
+    __syncthreads();
 
     if (row < N) 
 	{	
-		for (int i = 0; i < N; i++) 
+		// calculate using numbers in shared memory
+        for (int i = 0; i < numShared; i++) 
 		{
-			result[row] += matrix[row * N + i] * vector[i];
+			result[row] += matrix[row * N + i] * cachedVector[i];
 		}
 
+        // calculate rest of computation using numbers from global memory
+        for (int i = numShared; i < N; i++) 
+        {
+            result[row] += matrix[row * N + i] * vector[i];
+        }
 	}
 }
 
@@ -83,7 +107,7 @@ void fillDefault(double *arr, int N)
 
 // Subtracts the result vector array from blasResult vector array
 // Stores the calculated difference in the residual vector array
-// result, blasResult, and residual arrays' lenghths must match the passed in
+// result, blasResult, and residual arrays' lengths must match the passed in
 //      N parameter
 void calcResidual(double *result, double *blasResult, double *residual, int N)
 {
@@ -199,24 +223,24 @@ void printVec(double* vec, int N, string name)
 //      3rd element is number of threads per block
 void setUpConfigs(vector<vector<int>> &configs)
 {
-	// 1024 elements, 5 blocks, and 205 threads per block
-    vector<int> config1 = {1024, 5, 205};
+    // 1024 elements, 1 blocks, and 1024 threads per block   
+    vector<int> config1 = {1024, 1, 1024};
     configs.push_back(config1);
-    
-    // 4095 elements, 12 blocks, 342 threads per block
-	vector<int> config2 = {4095, 12, 342}; 
+
+    // 4095 elements, 4 blocks, 1024 threads per block
+    vector<int> config2 = {4095, 4, 1024};
     configs.push_back(config2);
-    
-    // 12 elements, 12 blocks, 1 thread per block
-	vector<int> config3 = {12, 12, 1}; 
+
+    // 12 elements, 1 block, 12 threads per block
+    vector<int> config3 = {12, 1, 12};
     configs.push_back(config3);
-    
-    // 8190 elements, 13 blocks, 630 threads per block
-    vector<int> config4 = {8190, 13, 630}; 
+
+    // 8190 elements, 8 blocks, 1024 threads per block
+    vector<int> config4 = {8190, 8, 1024};
     configs.push_back(config4);
-    
+
     // 11585 elements, 200 blocks, 58 threads per block
-    vector<int> config5 = {11585, 200, 58}; 
+    vector<int> config5 = {11585, 200, 58};
     configs.push_back(config5); 
 }
 
@@ -231,7 +255,7 @@ int main(int argc, char *argv[])
 
     // device copies of matrix, vector, result
     double *d_matrix, *d_vector, *d_result, *d_blasResult;
-  
+
     for (int i = 0; i < configs.size(); i++)
     {
         // get execution configuration
@@ -263,18 +287,29 @@ int main(int argc, char *argv[])
         cudaMemcpy(d_matrix, matrix, matrixSize, cudaMemcpyHostToDevice);
         cudaMemcpy(d_vector, vector, vectorSize, cudaMemcpyHostToDevice);
 
-        // lauch kernel function 
-        multiplyMV<<<numBlocks, numThreads>>>(d_matrix, d_vector, d_result, N);
-        
+        // Determine the maximum number of elements from the vector 
+        //      that can be copied into shared memory
+        // maximum shared memory per block is 48 KB so 6144 is the maximum number
+        //      of double numbers that can fit in shared memory
+        int SHARED_LIMIT = 6144;
+        int numShared = N;
+        if (numShared > SHARED_LIMIT) 
+        {
+            numShared = SHARED_LIMIT;
+        }
+
+        // launch kernel function 
+        multiplyMV<<<numBlocks, numThreads>>>(d_matrix, d_vector, d_result, N, numShared);
+
         // Copy result back to host
         cudaMemcpy(result, d_result, vectorSize, cudaMemcpyDeviceToHost);
 
         // Calculate using cuBLAS
         // cuBLAS is column-major but matrix and vector are stored in row-major 
         //		so need to transpose matrix to ensure correct computation
+        const double scale = 1;
         cublasHandle_t handle;
         cublasCreate(&handle);
-        const double scale = 1;
         cublasDgemv(handle, CUBLAS_OP_T, N, N, &scale, d_matrix, N, d_vector, 
                             1, &scale, d_blasResult, 1);
         cudaMemcpy(blasResult, d_blasResult, vectorSize, cudaMemcpyDeviceToHost);
@@ -291,7 +326,7 @@ int main(int argc, char *argv[])
         printVec(result, N, "Kernel Result");
         printVec(blasResult, N, "cuBLAS Result");
         printVec(residual, N, "Residual");
-        cout << "Is residual close to or equal to 0? ";
+        cout << "Is residual close or equal to 0? ";
         if (isSmallResidual) 
         {
             cout << "Yes" << endl;
